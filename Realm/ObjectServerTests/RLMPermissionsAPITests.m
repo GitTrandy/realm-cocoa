@@ -62,7 +62,7 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [ex fulfill];
     });
-    [self waitForExpectationsWithTimeout:(seconds + 5) handler:nil];
+    [self waitForExpectations:@[ex] timeout:(seconds + 5)];
 }
 
 /// Setting a permission should work, and then that permission should be able to be retrieved.
@@ -92,7 +92,7 @@
         XCTAssertNil(error);
         [ex2 fulfill];
     }];
-    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    [self waitForExpectations:@[ex2] timeout:2.0];
 
     // Now retrieve the permissions again and make sure the new permission is properly set.
     XCTestExpectation *ex3 = [self expectationWithDescription:@"One permission after setting the permission."];
@@ -108,11 +108,11 @@
         XCTAssertEqualObjects(p.path, [url path]);
         [ex3 fulfill];
     }];
-    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    [self waitForExpectations:@[ex3] timeout:2.0];
 }
 
 /// Deleting a permission should work.
-- (void)testDeletingPermission {
+- (void)DISABLED_testDeletingPermission {
     // Open a Realm for user A.
     NSURL *url = REALM_URL();
     [self openRealmForURL:url user:self.userA];
@@ -139,7 +139,8 @@
         XCTAssertEqual(results.count, 1);
         [ex2 fulfill];
     }];
-    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    // TODO: fix me
+    [self waitForExpectations:@[ex2] timeout:2.0];
 
     // Delete the permission.
     XCTestExpectation *ex3 = [self expectationWithDescription:@"Deleting a permission should work."];
@@ -150,7 +151,7 @@
     [self waitForExpectationsWithTimeout:2.0 handler:nil];
 
     // Make sure the permission deletion is properly reflected.
-    XCTestExpectation *ex4 = [self expectationWithDescription:@"One permission after setting the permission."];
+    XCTestExpectation *ex4 = [self expectationWithDescription:@"No permissions after deleting the permission."];
     [self.userA retrievePermissions:^(RLMSyncPermissionResults *results, NSError *error) {
         WORKAROUND_PAUSE();
         XCTAssertNil(error);
@@ -158,7 +159,7 @@
         XCTAssertEqual(results.count, 0);
         [ex4 fulfill];
     }];
-    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    [self waitForExpectations:@[ex4] timeout:2.0];
 }
 
 
@@ -241,7 +242,7 @@
         XCTAssertEqual(results.count, 0);
         [ex3 fulfill];
     }];
-    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    [self waitForExpectations:@[ex3] timeout:2.0];
 }
 
 @end
