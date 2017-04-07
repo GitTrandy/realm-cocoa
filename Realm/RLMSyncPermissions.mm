@@ -51,6 +51,41 @@ RLMSyncAccessLevel objCAccessLevelForAccessLevel(Permission::AccessLevel level) 
     REALM_UNREACHABLE();
 }
 
+NSString *descriptionForAccessLevel(RLMSyncAccessLevel level) {
+    switch (level) {
+        case RLMSyncAccessLevelNone:
+            return @"none";
+        case RLMSyncAccessLevelRead:
+            return @"read";
+        case RLMSyncAccessLevelWrite:
+            return @"write";
+        case RLMSyncAccessLevelAdmin:
+            return @"admin";
+    }
+    REALM_UNREACHABLE();
+}
+
+// Returns true if the paths are literally equal, or if one path can be translated
+// into the other path via user-ID substitution.
+BOOL pathsAreEquivalent(NSString *thisPath, NSString *thatPath, NSString *thisUserID, NSString *thatUserID)
+{
+    if ([thisPath isEqualToString:thatPath]) {
+        return YES;
+    }
+    NSRange tildeRange = [thisPath rangeOfString:@"~"];
+    if (tildeRange.length > 0) {
+        // Substitute in the user ID for the `/~/` portion of the path, if applicable.
+        return [[thisPath stringByReplacingCharactersInRange:tildeRange
+                                                  withString:thisUserID] isEqualToString:thatPath];
+    }
+    tildeRange = [thatPath rangeOfString:@"~"];
+    if (tildeRange.length > 0) {
+        return [[thatPath stringByReplacingCharactersInRange:tildeRange
+                                                  withString:thatUserID] isEqualToString:thisPath];
+    }
+    return NO;
+}
+
 }
 
 #pragma mark - Permission
@@ -121,14 +156,6 @@ RLMSyncAccessLevel objCAccessLevelForAccessLevel(Permission::AccessLevel level) 
     return _accessLevel;
 }
 
-- (BOOL)isEqual:(id)object {
-    if ([object isKindOfClass:[RLMSyncPermissionValue class]]) {
-        RLMSyncPermissionValue *that = (RLMSyncPermissionValue *)object;
-        return self.accessLevel == that.accessLevel && [self.path isEqual:that.path];
-    }
-    return NO;
-}
-
 - (realm::Permission)rawPermission {
     REALM_TERMINATE("Subclasses must override this method.");
 }
@@ -189,6 +216,23 @@ RLMSyncAccessLevel objCAccessLevelForAccessLevel(Permission::AccessLevel level) 
     };
 }
 
+- (BOOL)isEqual:(id)object {
+    if ([object isKindOfClass:[RLMSyncUserIDPermissionValue class]]) {
+        RLMSyncUserIDPermissionValue *that = (RLMSyncUserIDPermissionValue *)object;
+        return (self.accessLevel == that.accessLevel
+                && pathsAreEquivalent(self.path, that.path, self.userID, that.userID)
+                && [self.userID isEqualToString:that.userID]);
+    }
+    return NO;
+}
+
+- (NSString *)description {
+    return [NSString stringWithFormat:@"<RLMSyncUserIDPermissionValue> user ID: %@, path: %@, access level: %@",
+            self.userID,
+            self.path,
+            descriptionForAccessLevel(self.accessLevel)];
+}
+
 @end
 
 #pragma mark - Key value permission
@@ -239,6 +283,25 @@ RLMSyncAccessLevel objCAccessLevelForAccessLevel(Permission::AccessLevel level) 
     }
     REALM_TERMINATE("Not yet implemented for user-defined permissions");
     // TODO: implement this
+}
+
+- (BOOL)isEqual:(id)object {
+    if ([object isKindOfClass:[RLMSyncKeyValuePermissionValue class]]) {
+        RLMSyncKeyValuePermissionValue *that = (RLMSyncKeyValuePermissionValue *)object;
+        return (self.accessLevel == that.accessLevel
+                && pathsAreEquivalent(self.path, that.path, self.userID, that.userID)
+                && [self.key isEqualToString:that.key]
+                && [self.value isEqualToString:that.value]);
+    }
+    return NO;
+}
+
+- (NSString *)description {
+    return [NSString stringWithFormat:@"<RLMSyncKeyValuePermissionValue> key: %@, value: %@, path: %@ access level: %@",
+            self.key,
+            self.value,
+            self.path,
+            descriptionForAccessLevel(self.accessLevel)];
 }
 
 @end

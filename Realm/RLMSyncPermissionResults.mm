@@ -33,7 +33,7 @@ using namespace realm;
 @implementation RLMSyncPermissionResultsToken
 
 - (void)suppressNextNotification {
-    @throw RLMException(@"RLMPermissionResultsNotificationTokens cannot be passed to "
+    @throw RLMException(@"RLMPermissionResultsTokens cannot be passed to "
                         @"the commitWriteTransactionWithoutNotifying: method");
 }
 
@@ -43,9 +43,9 @@ using namespace realm;
 
 - (void)dealloc {
     if (_token) {
-        NSLog(@"RLMPermissionResultsNotificationToken released without unregistering "
+        NSLog(@"RLMPermissionResultsToken released without unregistering "
               @"a notification. You must hold on to the token and call "
-              @"-[RLMPermissionResultsNotificationToken stop] when you no longer wish "
+              @"-[RLMPermissionResultsToken stop] when you no longer wish "
               @"to receive notifications.");
     }
 }
@@ -53,6 +53,7 @@ using namespace realm;
 - (instancetype)initWithToken:(NotificationToken)token {
     if (self = [super init]) {
         _token = std::make_unique<NotificationToken>(std::move(token));
+        return self;
     }
     return nil;
 }
@@ -92,6 +93,19 @@ using namespace realm;
         _results = std::move(results);
     }
     return self;
+}
+
+- (NSString *)description {
+    constexpr int NUMBER_OF_ITEMS = 4;
+    NSMutableString *base = [NSMutableString stringWithFormat:@"<RLMSyncPermissionResults> (%@ items)", @(self.count)];
+    // Stick the first few items in the description.
+    for (NSInteger i=0; i<MIN(self.count, NUMBER_OF_ITEMS); i++) {
+        [base appendFormat:@"\n    [%@]: %@", @(i), [self permissionAtIndex:i]];
+    }
+    if (self.count > NUMBER_OF_ITEMS) {
+        [base appendFormat:@"\n    (%@ additional items...)", @(self.count - NUMBER_OF_ITEMS)];
+    }
+    return base;
 }
 
 @end

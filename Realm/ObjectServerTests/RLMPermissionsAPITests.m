@@ -22,7 +22,40 @@
 
 #import "RLMTestUtils.h"
 
-#define WORKAROUND_PAUSE() [self wait:1]
+#define PERMISSIONS_SPIN() [self spinOnMainQueue:1.0]
+
+#define CHECK_PERMISSION_COUNT(ma_results, ma_count) {                      \
+    [self spinOnMainQueue:0.20];                                            \
+    XCTAssertEqual(ma_results.count,ma_count,                               \
+                  @"Did not find expected number of permissions");          \
+}
+
+#define CHECK_PERMISSION_PRESENT(ma_results, ma_permission) {               \
+    [self spinOnMainQueue:0.20];                                            \
+    BOOL permissionFound = NO;                                              \
+    for (NSInteger i=0; i<ma_results.count; i++) {                          \
+        if ([[ma_results permissionAtIndex:i] isEqual:ma_permission]) {     \
+            permissionFound = YES;                                          \
+            break;                                                          \
+        }                                                                   \
+    }                                                                       \
+    XCTAssertTrue(permissionFound,                                          \
+                  @"Could not find permission %@ (results: %@)",            \
+                  ma_permission, ma_results);                               \
+}
+
+#define CHECK_PERMISSION_ABSENT(ma_results, ma_permission) {                \
+    [self spinOnMainQueue:0.20];                                            \
+    BOOL permissionFound = NO;                                              \
+    for (NSInteger i=0; i<ma_results.count; i++) {                          \
+        if ([[ma_results permissionAtIndex:i] isEqual:ma_permission]) {     \
+            permissionFound = YES;                                          \
+            break;                                                          \
+        }                                                                   \
+    }                                                                       \
+    XCTAssertFalse(permissionFound,                                         \
+                   @"Found unexpected permission %@", ma_permission);       \
+}
 
 @interface RLMPermissionsAPITests : RLMSyncTestCase
 
@@ -33,6 +66,15 @@
 @end
 
 @implementation RLMPermissionsAPITests
+
+- (void)spinOnMainQueue:(NSTimeInterval)timeInterval {
+    XCTestExpectation *ex = [self expectationWithDescription:@"Waiting..."];
+    double ns = ((double)NSEC_PER_SEC) * timeInterval;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)ns), dispatch_get_main_queue(), ^{
+        [ex fulfill];
+    });
+    [self waitForExpectations:@[ex] timeout:5];
+}
 
 - (void)setUp {
     [super setUp];
@@ -57,25 +99,19 @@
     [super tearDown];
 }
 
-- (void)wait:(NSInteger)seconds {
-    XCTestExpectation *ex = [self expectationWithDescription:@"Waiting..."];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [ex fulfill];
-    });
-    [self waitForExpectations:@[ex] timeout:(seconds + 5)];
-}
-
 /// Setting a permission should work, and then that permission should be able to be retrieved.
 - (void)testSettingPermission {
     // First, there should be no permissions.
     XCTestExpectation *ex = [self expectationWithDescription:@"No permissions for newly created user."];
-    [self.userA retrievePermissions:^(RLMSyncPermissionResults *results, NSError *error) {
+    __block RLMSyncPermissionResults *results;
+    [self.userA retrievePermissions:^(RLMSyncPermissionResults *r, NSError *error) {
         XCTAssertNil(error);
-        XCTAssertNotNil(results);
-        XCTAssertEqual(results.count, 0);
+        XCTAssertNotNil(r);
+        results = r;
         [ex fulfill];
     }];
     [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    CHECK_PERMISSION_COUNT(results, 0);
 
     // Open a Realm for user A.
     NSURL *url = REALM_URL();
@@ -92,27 +128,30 @@
         XCTAssertNil(error);
         [ex2 fulfill];
     }];
-    [self waitForExpectations:@[ex2] timeout:2.0];
+    [self waitForExpectationsWithTimeout:2.0 handler:nil];
 
     // Now retrieve the permissions again and make sure the new permission is properly set.
     XCTestExpectation *ex3 = [self expectationWithDescription:@"One permission after setting the permission."];
-    [self.userA retrievePermissions:^(RLMSyncPermissionResults *results, NSError *error) {
-        WORKAROUND_PAUSE();
-
+    [self.userA retrievePermissions:^(RLMSyncPermissionResults *r, NSError *error) {
         XCTAssertNil(error);
-        XCTAssertNotNil(results);
-        XCTAssertEqual(results.count, 1);
-        RLMSyncPermissionValue *p = [results permissionAtIndex:0];
-        XCTAssertEqualObjects(p.userID, self.userB.identity);
-        XCTAssertEqual(p.accessLevel, RLMSyncAccessLevelRead);
-        XCTAssertEqualObjects(p.path, [url path]);
+        XCTAssertNotNil(r);
+        results = r;
         [ex3 fulfill];
     }];
-    [self waitForExpectations:@[ex3] timeout:2.0];
+    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    // Expected permission: applies to user B, but for user A's Realm.
+    id expectedPermission = [[RLMSyncPermissionValue alloc] initWithRealmPath:[NSString stringWithFormat:@"/%@/%@",
+                                                                               self.userA.identity,
+                                                                               NSStringFromSelector(_cmd)]
+                                                                       userID:self.userB.identity
+                                                                  accessLevel:RLMSyncAccessLevelRead];
+    CHECK_PERMISSION_PRESENT(results, expectedPermission);
 }
 
 /// Deleting a permission should work.
-- (void)DISABLED_testDeletingPermission {
+- (void)testDeletingPermission {
+    __block RLMSyncPermissionResults *results;
+
     // Open a Realm for user A.
     NSURL *url = REALM_URL();
     [self openRealmForURL:url user:self.userA];
@@ -132,15 +171,19 @@
 
     // Now retrieve the permissions again and make sure the new permission is properly set.
     XCTestExpectation *ex2 = [self expectationWithDescription:@"One permission after setting the permission."];
-    [self.userA retrievePermissions:^(RLMSyncPermissionResults *results, NSError *error) {
-        WORKAROUND_PAUSE();
+    [self.userA retrievePermissions:^(RLMSyncPermissionResults *r, NSError *error) {
         XCTAssertNil(error);
-        XCTAssertNotNil(results);
-        XCTAssertEqual(results.count, 1);
+        XCTAssertNotNil(r);
+        results = r;
         [ex2 fulfill];
     }];
-    // TODO: fix me
-    [self waitForExpectations:@[ex2] timeout:2.0];
+    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    id expectedPermission = [[RLMSyncPermissionValue alloc] initWithRealmPath:[NSString stringWithFormat:@"/%@/%@",
+                                                                               self.userA.identity,
+                                                                               NSStringFromSelector(_cmd)]
+                                                                       userID:self.userB.identity
+                                                                  accessLevel:RLMSyncAccessLevelRead];
+    CHECK_PERMISSION_PRESENT(results, expectedPermission);
 
     // Delete the permission.
     XCTestExpectation *ex3 = [self expectationWithDescription:@"Deleting a permission should work."];
@@ -152,14 +195,14 @@
 
     // Make sure the permission deletion is properly reflected.
     XCTestExpectation *ex4 = [self expectationWithDescription:@"No permissions after deleting the permission."];
-    [self.userA retrievePermissions:^(RLMSyncPermissionResults *results, NSError *error) {
-        WORKAROUND_PAUSE();
+    [self.userA retrievePermissions:^(RLMSyncPermissionResults *r, NSError *error) {
         XCTAssertNil(error);
-        XCTAssertNotNil(results);
-        XCTAssertEqual(results.count, 0);
+        XCTAssertNotNil(r);
+        results = r;
         [ex4 fulfill];
     }];
-    [self waitForExpectations:@[ex4] timeout:2.0];
+    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    CHECK_PERMISSION_ABSENT(results, expectedPermission);
 }
 
 
@@ -170,22 +213,22 @@
     __block RLMSyncPermissionResults *results = nil;
     [self.userA retrievePermissions:^(RLMSyncPermissionResults *r, NSError *error) {
         XCTAssertNil(error);
+        XCTAssertNotNil(r);
         results = r;
         [ex fulfill];
     }];
     [self waitForExpectationsWithTimeout:2.0 handler:nil];
-    XCTAssertNotNil(results);
 
     // Open a Realm for user A.
     NSURL *url = REALM_URL();
     [self openRealmForURL:url user:self.userA];
 
     // Register notifications.
-    __block BOOL resultsNoLongerEmpty = NO;
+    XCTestExpectation *noteEx = [self expectationWithDescription:@"Notification should fire."];
     RLMSyncPermissionResultsToken *token = [results addNotificationBlock:^(NSError *error) {
         XCTAssertNil(error);
-        if ([results count] > 0) {
-            resultsNoLongerEmpty = YES;
+        if (results.count > 0) {
+            [noteEx fulfill];
         }
     }];
 
@@ -200,21 +243,23 @@
         XCTAssertNil(error);
         [ex2 fulfill];
     }];
-    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+    [self waitForExpectations:@[ex2] timeout:2.0];
 
-    // Now wait for the block to fire.
-    if (!resultsNoLongerEmpty) {
-        XCTestExpectation *ex3 = [self expectationWithDescription:@"Results block should provide updates."];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [ex3 fulfill];
-        });
-        [self waitForExpectationsWithTimeout:2.0 handler:nil];
-    }
+    // Wait for the notification to be fired.
+    [self waitForExpectations:@[noteEx] timeout:2.0];
     [token stop];
+    id expectedPermission = [[RLMSyncPermissionValue alloc] initWithRealmPath:[NSString stringWithFormat:@"/%@/%@",
+                                                                               self.userA.identity,
+                                                                               NSStringFromSelector(_cmd)]
+                                                                       userID:self.userB.identity
+                                                                  accessLevel:RLMSyncAccessLevelRead];
+    CHECK_PERMISSION_PRESENT(results, expectedPermission);
 }
 
 /// User should not be able to change a permission for a Realm they don't own.
 - (void)testSettingUnownedRealmPermission {
+    __block RLMSyncPermissionResults *results;
+
     // Open a Realm for user A.
     NSURL *url = REALM_URL();
     [self openRealmForURL:url user:self.userA];
@@ -232,17 +277,25 @@
     }];
     [self waitForExpectationsWithTimeout:2.0 handler:nil];
 
+    // Wait for server to make any change and propagate it back to the client.
+    PERMISSIONS_SPIN();
+
     // Now retrieve the permissions again and make sure the new permission was not set.
     XCTestExpectation *ex3 = [self expectationWithDescription:@"One permission after setting the permission."];
-    [self.userB retrievePermissions:^(RLMSyncPermissionResults *results, NSError *error) {
-        WORKAROUND_PAUSE();
-
+    [self.userB retrievePermissions:^(RLMSyncPermissionResults *r, NSError *error) {
         XCTAssertNil(error);
-        XCTAssertNotNil(results);
-        XCTAssertEqual(results.count, 0);
+        XCTAssertNotNil(r);
+        results = r;
         [ex3 fulfill];
     }];
-    [self waitForExpectations:@[ex3] timeout:2.0];
+    [self waitForExpectationsWithTimeout:2.0 handler:nil];
+
+    id expectedPermission = [[RLMSyncPermissionValue alloc] initWithRealmPath:[NSString stringWithFormat:@"/%@/%@",
+                                                                               self.userA.identity,
+                                                                               NSStringFromSelector(_cmd)]
+                                                                       userID:self.userC.identity
+                                                                  accessLevel:RLMSyncAccessLevelRead];
+    CHECK_PERMISSION_ABSENT(results, expectedPermission);
 }
 
 @end
